@@ -16,14 +16,17 @@ cur_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # utilities
 . "$cur_dir/utilities.sh"
 
+# GPIO utilites
+. "$cur_dir/gpio-util.sh"
+
 log 'Witty Pi daemon (v2.183) is started.'
 
-# halt by GPIO-4 (wiringPi pin 7)
-halt_pin=7
+# halt by GPIO-4
+halt_pin=4
 
 # make sure the halt pin is input with internal pull up
-gpio mode $halt_pin up
-gpio mode $halt_pin in
+gpio -g mode $halt_pin up
+gpio -g mode $halt_pin in
 
 # LED on GPIO-17 (wiringPi pin 0)
 led_pin=0
@@ -54,10 +57,10 @@ while [ $counter -lt 10 ]; do  # increase this value if it needs more time
   sleep 1
 done
 
-# wait for GPIO-4 (wiringPi pin 7) falling, or alarm B
+# wait for GPIO-4 falling, or alarm B
 log 'Pending for incoming shutdown command...'
 while true; do
-  gpio wfi $halt_pin falling
+  gpio -g wfi $halt_pin falling
   sleep 0.05  # ignore short pull down (increase this value to ignore longer pull down)
   if [ $(gpio read $halt_pin) == '0' ] ; then
     break
@@ -76,8 +79,8 @@ gpio mode $led_pin out
 gpio write $led_pin 1
 
 # restore GPIO-4
-gpio mode $halt_pin in
-gpio mode $halt_pin up
+gpio -g mode $halt_pin in
+gpio -g mode $halt_pin up
 
 if $has_rtc ; then
   # clear alarm flags

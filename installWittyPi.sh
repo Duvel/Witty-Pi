@@ -71,27 +71,6 @@ else
   apt-get install -y i2c-tools || ((ERR++))
 fi
 
-# install wiringPi
-if [ $ERR -eq 0 ]; then
-  echo '>>> Install wiringPi'
-  if hash gpio 2>/dev/null; then
-    echo 'Seems wiringPi is installed already, skip this step.'
-  else
-    if hash git 2>/dev/null; then
-      echo "Git is ready to go..."
-    else
-      echo "Git is missing, install it now..."
-      apt-get install -y git || ((ERR++))
-    fi
-    if [ $ERR -eq 0 ]; then
-      git clone git://git.drogon.net/wiringPi || ((ERR++))
-      cd wiringPi
-      ./build
-      cd ..
-    fi
-  fi
-fi
-
 # install wittyPi
 if [ $ERR -eq 0 ]; then
   echo '>>> Install wittyPi'
