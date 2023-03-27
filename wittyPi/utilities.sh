@@ -4,6 +4,9 @@
 # This script provides some useful utility functions
 #
 
+readonly I2C_RTC_ADDRESS=0x68
+
+
 has_internet()
 {
   nc -z -w 5 8.8.8.8 53  >/dev/null 2>&1
@@ -16,7 +19,6 @@ has_internet()
 
 force_ntp_update()
 {
-  log 'Pushing NTP to update system time...'
   /etc/init.d/ntp stop
   ntpd -q -g
   /etc/init.d/ntp start
@@ -59,18 +61,25 @@ unload_rtc()
   rmmod rtc-ds1307
 }
 
+get_sys_time()
+{
+  echo $(date +'%a %d %b %Y %H:%M:%S %Z')
+}
+
+get_sys_timestamp()
+{
+  echo $(date -u +%s)
+}
+
 get_rtc_timestamp()
 {
-  load_rtc
-  LANG=C
-  local rtctime=$(hwclock | awk '{$6=$7="";print $0}');
-  unload_rtc
-  if [ "$rtctime" == "" ] ; then
-    echo ''
-  else
-    local rtctimestamp=$(date -d "$rtctime" +%s)
-    echo $rtctimestamp
-  fi
+  sec=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x00))
+  min=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x01))
+  hour=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x02))
+  date=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x04))
+  month=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x05))
+  year=$(bcd2dec $(i2c_read 0x01 $I2C_RTC_ADDRESS 0x06))
+  echo $(date --date="$year-$month-$date $hour:$min:$sec UTC" +%s)
 }
 
 get_rtc_time()
@@ -81,6 +90,11 @@ get_rtc_time()
   else
     echo $(date +'%a %d %b %Y %H:%M:%S %Z' -d @$rtc_ts)
   fi
+}
+
+calc()
+{
+  awk "BEGIN { print $*}";
 }
 
 bcd2dec()
@@ -121,7 +135,7 @@ get_utc_date_time()
   local datestr=$(date +%Y-)
   local curDate=$(date +%d)
   if [[ "$date" < "$curDate" ]] ; then
-    datestr+=$(date --date="$(date +%m) +1 month" +%m-)
+    datestr+=$(date --date="$(date +%Y-%m-15) +1 month" +%m-)
   else
     datestr+=$(date +%m-)
   fi
@@ -169,7 +183,7 @@ get_local_date_time()
   local datestr=$(date +%Y-)
   local curDate=$(date +%d)
   if [[ "$date" < "$curDate" ]] ; then
-    datestr+=$(date --date="$(date +%m) +1 month" +%m-)
+    datestr+=$(date --date="$(date +%Y-%m-15) +1 month" +%m-)
   else
     datestr+=$(date +%m-)
   fi
@@ -177,17 +191,19 @@ get_local_date_time()
   local result=$(date -d "$datestr" +"%d %H:%M:%S" 2>/dev/null)
   IFS=' ' read -r date timestr <<< "$result"
   IFS=':' read -r hour minute second <<< "$timestr"
-  if [ $bk_date == '??' ]; then
-    date='??'
-  fi
-  if [ $bk_hour == '??' ]; then
-    hour='??'
-  fi
-  if [ $bk_min == '??' ]; then
-    minute='??'
-  fi
-  if [ $bk_sec == '??' ]; then
-    second='??'
+  if [ -z ${2+x} ] ; then
+    if [ $bk_date == '??' ]; then
+      date='??'
+    fi
+    if [ $bk_hour == '??' ]; then
+      hour='??'
+    fi
+    if [ $bk_min == '??' ]; then
+      minute='??'
+    fi
+    if [ $bk_sec == '??' ]; then
+      second='??'
+    fi
   fi
   echo "$date $hour:$minute:$second"
 }
@@ -300,29 +316,30 @@ clear_shutdown_time()
 system_to_rtc()
 {
   log '  Writing system time to RTC...'
-  load_rtc
-  local err=$((hwclock -w) 2>&1)
-  if [ "$err" == "" ] ; then
-    log '  Done :-)'
-  else
-    log '  Failed :-('
-    log "$err"
-  fi
-  unload_rtc
+  local sys_ts=$(calc $(get_sys_timestamp)+1)
+  local sec=$(date -u -d @$sys_ts +%S)
+  local min=$(date -u -d @$sys_ts +%M)
+  local hour=$(date -u -d @$sys_ts +%H)
+  local day=$(date -u -d @$sys_ts +%u)
+  local date=$(date -u -d @$sys_ts +%d)
+  local month=$(date -u -d @$sys_ts +%m)
+  local year=$(date -u -d @$sys_ts +%y)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x00 $(dec2bcd $sec)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x01 $(dec2bcd $min)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x02 $(dec2bcd $hour)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x03 $(dec2bcd $day)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x04 $(dec2bcd $date)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x05 $(dec2bcd $month)
+  i2c_write 0x01 $I2C_RTC_ADDRESS 0x06 $(dec2bcd $year)
+  log '  Done :-)'
 }
 
 rtc_to_system()
 {
   log '  Writing RTC time to system...'
-  load_rtc
-  local err=$((hwclock -s) 2>&1)
-  if [ "$err" == "" ] ; then
-    log '  Done :-)'
-  else
-    log '  Failed :-('
-    log "$err"
-  fi
-  unload_rtc
+  local rtc_ts=$(get_rtc_timestamp)
+  sudo date -u -s @$rtc_ts >/dev/null
+  log '  Done :-)'
 }
 
 trim()
